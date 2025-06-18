@@ -1,49 +1,54 @@
 // backend/src/models/CourseRegistration.js
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-const Student = require('./Student');
-const Course = require('./Course');
+const { DataTypes } = require("sequelize");
 
-const CourseRegistration = sequelize.define('CourseRegistrations', {
-    registration_id: {
+module.exports = (sequelize) => {
+  const CourseRegistration = sequelize.define(
+    "CourseRegistration",
+    {
+      registration_id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    student_id: {
+        primaryKey: true,
+        allowNull: false,
+      },
+      student_id: {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Student,
-            key: 'student_id'
-        }
-    },
-    course_id: {
+          model: "Students", // Tên bảng Students
+          key: "student_id",
+        },
+      },
+      course_id: {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Course,
-            key: 'course_id'
-        }
+          model: "Courses", // Tên bảng Courses
+          key: "course_id",
+        },
+      },
+      registration_date: {
+        type: DataTypes.DATEONLY,
+        defaultValue: DataTypes.NOW,
+        allowNull: false,
+      },
+      semester: {
+        // Ví dụ: '2024-2025/1'
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
     },
-    semester: {
-        type: DataTypes.STRING(50),
-        allowNull: false
-    }
-}, {
-    indexes: [
+    {
+      tableName: "CourseRegistrations", // Tên bảng trong cơ sở dữ liệu
+      timestamps: true,
+      // Đảm bảo mỗi sinh viên chỉ đăng ký một môn một lần trong một học kỳ cụ thể
+      indexes: [
         {
-            unique: true,
-            fields: ['student_id', 'course_id', 'semester']
-        }
-    ]
-});
-
-// Define associations
-Student.hasMany(CourseRegistration, { foreignKey: 'student_id' });
-CourseRegistration.belongsTo(Student, { foreignKey: 'student_id' });
-
-Course.hasMany(CourseRegistration, { foreignKey: 'course_id' });
-CourseRegistration.belongsTo(Course, { foreignKey: 'course_id' });
-
-module.exports = CourseRegistration;
+          unique: true,
+          fields: ["student_id", "course_id", "semester"],
+        },
+      ],
+    }
+  );
+  return CourseRegistration;
+};

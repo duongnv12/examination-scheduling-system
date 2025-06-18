@@ -1,35 +1,47 @@
 // backend/src/app.js
-const express = require('express');
-const cors = require('cors');
-// Import các routes
-const courseRoutes = require('./routes/courseRoutes');
-const roomRoutes = require('./routes/roomRoutes');
-const studentRoutes = require('./routes/studentRoutes');
-const facultyRoutes = require('./routes/facultyRoutes');
-const courseRegistrationRoutes = require('./routes/courseRegistrationRoutes');
-const examScheduleRoutes = require('./routes/examScheduleRoutes');
-const examInvigilatorRoutes = require('./routes/examInvigilatorRoutes');
+const express = require("express");
+const cors = require("cors"); // Để xử lý CORS
+const dotenv = require("dotenv"); // Để tải biến môi trường từ .env
+const path = require("path"); // Module để làm việc với đường dẫn file/thư mục
+
+// Tải biến môi trường từ file .env
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+// Import database connection and models (chỉ import để định nghĩa models và thiết lập quan hệ)
+// Việc đồng bộ hóa DB sẽ diễn ra ở server.js
+require("./models");
+
+// Import main routes
+const apiRoutes = require("./routes/index");
 
 const app = express();
 
-// Middlewares
-app.use(cors()); // Cho phép CORS
-app.use(express.json()); // Phân tích JSON body của request
+// --- Middleware ---
 
-// Định nghĩa các API Routes
-app.use('/api/courses', courseRoutes);
-app.use('/api/rooms', roomRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/faculty', facultyRoutes);
-app.use('/api/course-registrations', courseRegistrationRoutes);
-app.use('/api/exam-schedules', examScheduleRoutes);
-app.use('/api/exam-invigilators', examInvigilatorRoutes);
+// Enable CORS
+// Cho phép tất cả các miền truy cập API của bạn.
+// Trong môi trường production, bạn nên giới hạn chỉ các miền đáng tin cậy.
+app.use(cors());
 
+// Body parser: Cho phép Express đọc dữ liệu JSON được gửi trong body của request
+app.use(express.json());
 
-// Route kiểm tra sức khỏe của API
-app.get('/', (req, res) => {
-    res.send('Examination Scheduling System Backend API is running!');
+// --- Routes ---
+
+// Gắn tất cả các API routes dưới tiền tố /api
+app.use("/api", apiRoutes);
+
+// --- Xử lý lỗi (Error Handling Middleware) ---
+// Middleware này sẽ bắt tất cả các lỗi xảy ra trong các route hoặc middleware trước đó.
+app.use((err, req, res, next) => {
+  console.error(err.stack); // Ghi log stack trace của lỗi để debug
+  res.status(err.statusCode || 500).json({
+    success: false,
+    message: err.message || "Đã xảy ra lỗi server nội bộ.",
+    // Chỉ gửi chi tiết lỗi trong môi trường phát triển
+    error: process.env.NODE_ENV === "development" ? err : {},
+  });
 });
 
-// Export đối tượng app để server.js có thể sử dụng
+// Xuất ứng dụng Express để được sử dụng bởi server.js
 module.exports = app;

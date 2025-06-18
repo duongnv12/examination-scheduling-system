@@ -1,80 +1,69 @@
 // backend/src/models/ExamSchedule.js
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-const Course = require('./Course');
-const Room = require('./Room');
+const { DataTypes } = require("sequelize");
 
-const ExamSchedule = sequelize.define('ExamSchedules', {
-    schedule_id: {
+module.exports = (sequelize) => {
+  const ExamSchedule = sequelize.define(
+    "ExamSchedule",
+    {
+      schedule_id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    course_id: {
+        primaryKey: true,
+        allowNull: false,
+      },
+      course_id: {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Course,
-            key: 'course_id'
-        }
-    },
-    room_id: {
+          model: "Courses",
+          key: "course_id",
+        },
+      },
+      room_id: {
         type: DataTypes.UUID,
         allowNull: false,
         references: {
-            model: Room,
-            key: 'room_id'
-        }
-    },
-    exam_date: {
+          model: "Rooms",
+          key: "room_id",
+        },
+      },
+      exam_date: {
         type: DataTypes.DATEONLY,
-        allowNull: false
-    },
-    exam_slot: {
-        type: DataTypes.STRING(50),
-        allowNull: false
-    },
-    start_time: {
-        type: DataTypes.TIME,
-        allowNull: false
-    },
-    end_time: {
-        type: DataTypes.TIME,
-        allowNull: false
-    },
-    scheduled_students_count: {
+        allowNull: false,
+      },
+      start_time: {
+        type: DataTypes.STRING, // Dạng 'HH:MM'
+        allowNull: false,
+      },
+      end_time: {
+        type: DataTypes.STRING, // Dạng 'HH:MM'
+        allowNull: false,
+      },
+      exam_slot: {
+        // ID của ca thi (ví dụ: '1', '2', '5')
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      scheduled_students_count: {
+        // Số lượng sinh viên được xếp vào lịch này
         type: DataTypes.INTEGER,
         allowNull: false,
-        validate: {
-            min: 1
-        }
+      },
+      semester: {
+        // Học kỳ của kỳ thi
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      exam_type: {
+        // Ví dụ: 'Midterm', 'Final', 'Make-up'
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+    },
+    {
+      tableName: "ExamSchedules",
+      timestamps: true,
     }
-}, {
-    indexes: [
-        {
-            unique: true,
-            fields: ['room_id', 'exam_date', 'exam_slot']
-        },
-        {
-            unique: true,
-            fields: ['course_id', 'exam_date', 'exam_slot']
-        }
-    ],
-    // Custom validation to ensure start_time < end_time
-    validate: {
-        isStartTimeBeforeEndTime() {
-            if (this.start_time && this.end_time && this.start_time >= this.end_time) {
-                throw new Error('Start time must be before end time.');
-            }
-        }
-    }
-});
-
-// Define associations
-Course.hasMany(ExamSchedule, { foreignKey: 'course_id' });
-ExamSchedule.belongsTo(Course, { foreignKey: 'course_id' });
-
-Room.hasMany(ExamSchedule, { foreignKey: 'room_id' });
-ExamSchedule.belongsTo(Room, { foreignKey: 'room_id' });
-
-module.exports = ExamSchedule;
+  );
+  return ExamSchedule;
+};

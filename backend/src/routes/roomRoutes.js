@@ -1,12 +1,22 @@
 // backend/src/routes/roomRoutes.js
-const express = require('express');
-const router = express.Router();
-const roomController = require('../controllers/roomController');
+const express = require("express");
+const {
+  getRooms,
+  getRoom,
+  createRoom,
+  updateRoom,
+  deleteRoom,
+  importRooms,
+} = require("../controllers/roomController");
 
-router.get('/', roomController.getAllRooms);
-router.get('/:id', roomController.getRoomById);
-router.post('/', roomController.createRoom);
-router.put('/:id', roomController.updateRoom);
-router.delete('/:id', roomController.deleteRoom);
+const upload = require("../middleware/upload"); // Import middleware upload
+
+const router = express.Router();
+
+router.route("/").get(getRooms).post(createRoom);
+
+router.post("/import", upload.single("file"), importRooms); // Route cho import
+
+router.route("/:id").get(getRoom).put(updateRoom).delete(deleteRoom);
 
 module.exports = router;

@@ -1,171 +1,539 @@
 // backend/src/controllers/examScheduleController.js
-const { ExamSchedule, Course, Room, ExamInvigilator, Faculty } = require('../models');
-const { Op } = require('sequelize'); // For advanced queries like date ranges
+const {
+  ExamSchedule,
+  ExamInvigilator,
+  Course,
+  Room,
+  Lecturer,
+} = require("../models");
+const generateExamSchedule = require("../services/scheduleGenerator"); // Import service đã tạo
+const { Op } = require("sequelize");
 
-// 1. Get all exam schedules (with associated course and room info)
+// @desc    Get all exam schedules (with details)
+// @route   GET /api/exam-schedules
+// @access  Public
 exports.getAllExamSchedules = async (req, res) => {
-    try {
-        const schedules = await ExamSchedule.findAll({
-            include: [
-                { model: Course, attributes: ['course_code', 'course_name', 'exam_format'] },
-                { model: Room, attributes: ['room_name', 'capacity', 'room_type'] },
-                { model: ExamInvigilator, include: [{ model: Faculty, attributes: ['full_name', 'faculty_code'] }] }
-            ]
-        });
-        res.status(200).json(schedules);
-    } catch (error) {
-        console.error('Error fetching exam schedules:', error);
-        res.status(500).json({ message: 'Lỗi khi lấy danh sách lịch thi.', error: error.message });
-    }
+  try {
+    const schedules = await ExamSchedule.findAll({
+      include: [
+        {
+          model: Course,
+          as: "Course",
+          attributes: [
+            "course_code",
+            "course_name",
+            "credits",
+            "exam_duration_minutes",
+          ],
+        },
+        {
+          model: Room,
+          as: "Room",
+          attributes: ["room_name", "capacity", "room_type"],
+        },
+        {
+          model: ExamInvigilator,
+          as: "ExamInvigilators",
+          include: {
+            model: Lecturer,
+            as: "Lecturer",
+            attributes: ["full_name", "lecturer_code"],
+          },
+          attributes: ["invigilator_order", "role"],
+        },
+      ],
+      order: [
+        ["exam_date", "ASC"],
+        ["start_time", "ASC"],
+      ],
+    });
+    res.status(200).json({
+      success: true,
+      count: schedules.length,
+      data: schedules,
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy danh sách lịch thi:", error);
+    res.status(500).json({
+      success: false,
+      message: "Không thể lấy danh sách lịch thi.",
+      error: error.message,
+    });
+  }
 };
 
-// 2. Get exam schedule by ID
+// @desc    Get single exam schedule by ID
+// @route   GET /api/exam-schedules/:id
+// @access  Public
 exports.getExamScheduleById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const schedule = await ExamSchedule.findByPk(id, {
-            include: [
-                { model: Course, attributes: ['course_code', 'course_name', 'exam_format'] },
-                { model: Room, attributes: ['room_name', 'capacity', 'room_type'] },
-                { model: ExamInvigilator, include: [{ model: Faculty, attributes: ['full_name', 'faculty_code'] }] }
-            ]
-        });
-
-        if (!schedule) {
-            return res.status(404).json({ message: 'Không tìm thấy lịch thi.' });
-        }
-        res.status(200).json(schedule);
-    } catch (error) {
-        console.error('Error fetching exam schedule by ID:', error);
-        res.status(500).json({ message: 'Lỗi khi lấy thông tin lịch thi.', error: error.message });
+  try {
+    const schedule = await ExamSchedule.findByPk(req.params.id, {
+      include: [
+        {
+          model: Course,
+          as: "Course",
+          attributes: [
+            "course_code",
+            "course_name",
+            "credits",
+            "exam_duration_minutes",
+          ],
+        },
+        {
+          model: Room,
+          as: "Room",
+          attributes: ["room_name", "capacity", "room_type"],
+        },
+        {
+          model: ExamInvigilator,
+          as: "ExamInvigilators",
+          include: {
+            model: Lecturer,
+            as: "Lecturer",
+            attributes: ["full_name", "lecturer_code"],
+          },
+          attributes: ["invigilator_order", "role"],
+        },
+      ],
+    });
+    if (!schedule) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy lịch thi với ID ${req.params.id}`,
+      });
     }
+    res.status(200).json({
+      success: true,
+      data: schedule,
+    });
+  } catch (error) {
+    console.error(`Lỗi khi lấy thông tin lịch thi ID ${req.params.id}:`, error);
+    res.status(500).json({
+      success: false,
+      message: "Không thể lấy thông tin lịch thi.",
+      error: error.message,
+    });
+  }
 };
 
-// 3. Create a new exam schedule (manual creation, not automated scheduling)
-exports.createExamSchedule = async (req, res) => {
-    try {
-        const { course_id, room_id, exam_date, exam_slot, start_time, end_time, scheduled_students_count } = req.body;
-
-        if (!course_id || !room_id || !exam_date || !exam_slot || !start_time || !end_time || !scheduled_students_count) {
-            return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ thông tin lịch thi.' });
-        }
-        if (scheduled_students_count <= 0) {
-            return res.status(400).json({ message: 'Số lượng sinh viên phải lớn hơn 0.' });
-        }
-
-        // Basic validation: Check if room capacity is sufficient
-        const room = await Room.findByPk(room_id);
-        if (!room) {
-            return res.status(404).json({ message: 'Không tìm thấy phòng thi.' });
-        }
-        if (scheduled_students_count > room.capacity) {
-            return res.status(400).json({ message: `Số lượng sinh viên (${scheduled_students_count}) vượt quá sức chứa của phòng (${room.capacity}).` });
-        }
-
-        // Basic validation: Check if exam format matches room type
-        const course = await Course.findByPk(course_id);
-        if (!course) {
-            return res.status(404).json({ message: 'Không tìm thấy môn học.' });
-        }
-        // Example logic: if course needs 'Trắc nghiệm', room must be 'Phòng máy tính'
-        if (course.exam_format === 'Trắc nghiệm' && room.room_type !== 'Phòng máy tính') {
-             return res.status(400).json({ message: 'Môn thi trắc nghiệm phải được xếp vào phòng máy tính.' });
-        }
-
-
-        const newSchedule = await ExamSchedule.create({
-            course_id,
-            room_id,
-            exam_date,
-            exam_slot,
-            start_time,
-            end_time,
-            scheduled_students_count
-        });
-        res.status(201).json({ message: 'Lịch thi đã được tạo thành công!', schedule: newSchedule });
-    } catch (error) {
-        console.error('Error creating exam schedule:', error);
-        if (error.name === 'SequelizeUniqueConstraintError') {
-            return res.status(409).json({ message: 'Lịch thi đã bị trùng lặp (Phòng/Môn học đã được sử dụng trong ca này).' });
-        }
-        if (error.name === 'SequelizeValidationError') {
-            return res.status(400).json({ message: error.message, error: error.errors });
-        }
-        res.status(500).json({ message: 'Lỗi khi tạo lịch thi mới.', error: error.message });
-    }
-};
-
-// 4. Update exam schedule information
-exports.updateExamSchedule = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { course_id, room_id, exam_date, exam_slot, start_time, end_time, scheduled_students_count } = req.body;
-
-        const schedule = await ExamSchedule.findByPk(id);
-        if (!schedule) {
-            return res.status(404).json({ message: 'Không tìm thấy lịch thi để cập nhật.' });
-        }
-
-        // Update fields
-        schedule.course_id = course_id || schedule.course_id;
-        schedule.room_id = room_id || schedule.room_id;
-        schedule.exam_date = exam_date || schedule.exam_date;
-        schedule.exam_slot = exam_slot || schedule.exam_slot;
-        schedule.start_time = start_time || schedule.start_time;
-        schedule.end_time = end_time || schedule.end_time;
-        schedule.scheduled_students_count = scheduled_students_count || schedule.scheduled_students_count;
-
-        // Re-validate against room capacity and type if room_id or scheduled_students_count changed
-        if (room_id || scheduled_students_count) {
-            const room = await Room.findByPk(schedule.room_id); // Use updated room_id
-            if (!room) return res.status(404).json({ message: 'Phòng thi không tồn tại.' });
-            if (schedule.scheduled_students_count > room.capacity) {
-                return res.status(400).json({ message: `Số lượng sinh viên (${schedule.scheduled_students_count}) vượt quá sức chứa của phòng (${room.capacity}).` });
-            }
-
-            const course = await Course.findByPk(schedule.course_id); // Use updated course_id
-            if (!course) return res.status(404).json({ message: 'Môn học không tồn tại.' });
-            if (course.exam_format === 'Trắc nghiệm' && room.room_type !== 'Phòng máy tính') {
-                return res.status(400).json({ message: 'Môn thi trắc nghiệm phải được xếp vào phòng máy tính.' });
-            }
-        }
-
-
-        await schedule.save();
-
-        res.status(200).json({ message: 'Lịch thi đã được cập nhật thành công!', schedule });
-    } catch (error) {
-        console.error('Error updating exam schedule:', error);
-        if (error.name === 'SequelizeUniqueConstraintError') {
-            return res.status(409).json({ message: 'Lịch thi đã bị trùng lặp (Phòng/Môn học đã được sử dụng trong ca này).' });
-        }
-        if (error.name === 'SequelizeValidationError') {
-            return res.status(400).json({ message: error.message, error: error.errors });
-        }
-        res.status(500).json({ message: 'Lỗi khi cập nhật lịch thi.', error: error.message });
-    }
-};
-
-// 5. Delete an exam schedule
+// @desc    Delete an exam schedule
+// @route   DELETE /api/exam-schedules/:id
+// @access  Private (Admin)
 exports.deleteExamSchedule = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const schedule = await ExamSchedule.findByPk(id);
+  const transaction = await ExamSchedule.sequelize.transaction();
+  try {
+    const { id } = req.params;
 
-        if (!schedule) {
-            return res.status(404).json({ message: 'Không tìm thấy lịch thi để xóa.' });
-        }
-
-        // Before deleting, check if there are associated invigilators
-        const hasInvigilators = await ExamInvigilator.count({ where: { schedule_id: id } });
-        if (hasInvigilators > 0) {
-            return res.status(400).json({ message: 'Không thể xóa lịch thi này vì có giám thị được phân công. Vui lòng xóa phân công giám thị trước.' });
-        }
-
-        await schedule.destroy();
-        res.status(200).json({ message: 'Lịch thi đã được xóa thành công!' });
-    } catch (error) {
-        console.error('Error deleting exam schedule:', error);
-        res.status(500).json({ message: 'Lỗi khi xóa lịch thi.', error: error.message });
+    const schedule = await ExamSchedule.findByPk(id, { transaction });
+    if (!schedule) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy lịch thi với ID ${id} để xóa.`,
+      });
     }
+
+    // Xóa các phân công giám thị liên quan trước
+    await ExamInvigilator.destroy({
+      where: { schedule_id: id },
+      transaction,
+    });
+    console.log(`Đã xóa phân công giám thị cho lịch thi ID: ${id}`);
+
+    // Sau đó xóa lịch thi
+    const deletedRows = await schedule.destroy({ transaction });
+
+    if (deletedRows === 0) {
+      // Should not happen if schedule was found
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy lịch thi với ID ${id} để xóa.`,
+      });
+    }
+
+    await transaction.commit();
+    res.status(200).json({
+      success: true,
+      message: "Xóa lịch thi và phân công giám thị liên quan thành công.",
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(`Lỗi khi xóa lịch thi ID ${req.params.id}:`, error);
+    res.status(500).json({
+      success: false,
+      message: "Không thể xóa lịch thi.",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Generate exam schedule
+// @route   POST /api/exam-schedules/generate
+// @access  Private (Admin)
+exports.generateSchedule = async (req, res) => {
+  const { startDate, endDate, examSlotsPerDay, examType, semester } = req.body;
+
+  if (!startDate || !endDate || !examSlotsPerDay || !examType || !semester) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Vui lòng cung cấp đầy đủ startDate, endDate, examSlotsPerDay, examType và semester.",
+    });
+  }
+
+  // Kiểm tra định dạng ngày
+  if (isNaN(new Date(startDate)) || isNaN(new Date(endDate))) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Định dạng ngày không hợp lệ." });
+  }
+
+  if (new Date(startDate) > new Date(endDate)) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "Ngày bắt đầu không thể lớn hơn ngày kết thúc.",
+      });
+  }
+
+  if (![1, 2, 3, 4, 5, 6].includes(examSlotsPerDay)) {
+    return res
+      .status(400)
+      .json({
+        success: false,
+        message: "Số ca thi mỗi ngày không hợp lệ. Vui lòng chọn 1-6.",
+      });
+  }
+
+  try {
+    console.log(
+      `API gọi tạo lịch thi cho học kỳ ${semester}, loại ${examType} từ ${startDate} đến ${endDate}`
+    );
+    const result = await generateExamSchedule(
+      startDate,
+      endDate,
+      examSlotsPerDay,
+      examType,
+      semester
+    );
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: `Tạo lịch thi thành công. ${result.scheduled_courses_count} / ${result.total_courses_to_schedule} môn đã được xếp lịch.`,
+        data: {
+          scheduled_courses_count: result.scheduled_courses_count,
+          total_courses_to_schedule: result.total_courses_to_schedule,
+          unscheduled_courses_count: result.unscheduled_courses_count,
+          unscheduled_courses: result.unscheduled_courses,
+          errors: result.errors,
+          scheduled_exams: result.scheduled_exams,
+        },
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: `Tạo lịch thi hoàn tất nhưng có lỗi. ${result.unscheduled_courses_count} môn không xếp được lịch.`,
+        data: {
+          scheduled_courses_count: result.scheduled_courses_count,
+          total_courses_to_schedule: result.total_courses_to_schedule,
+          unscheduled_courses_count: result.unscheduled_courses_count,
+          unscheduled_courses: result.unscheduled_courses,
+          errors: result.errors,
+          scheduled_exams: result.scheduled_exams, // Vẫn trả về các lịch đã xếp nếu có
+        },
+      });
+    }
+  } catch (error) {
+    console.error("Lỗi khi gọi tạo lịch thi:", error);
+    res.status(500).json({
+      success: false,
+      message: "Đã xảy ra lỗi trong quá trình tạo lịch thi.",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Manually create an exam schedule entry (Admin only, use with caution)
+// @route   POST /api/exam-schedules/manual
+// @access  Private (Admin)
+exports.manualCreateExamSchedule = async (req, res) => {
+  try {
+    const {
+      course_id,
+      room_id,
+      exam_date,
+      start_time,
+      end_time,
+      exam_slot,
+      scheduled_students_count,
+      semester,
+      exam_type,
+      invigilator_ids,
+    } = req.body;
+
+    // Basic validation for required fields
+    if (
+      !course_id ||
+      !room_id ||
+      !exam_date ||
+      !start_time ||
+      !end_time ||
+      !exam_slot ||
+      !semester ||
+      !exam_type ||
+      !scheduled_students_count
+    ) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Missing required fields for manual schedule creation.",
+        });
+    }
+
+    // Validate existence of foreign keys
+    const course = await Course.findByPk(course_id);
+    const room = await Room.findByPk(room_id);
+    if (!course)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: `Course with ID ${course_id} not found.`,
+        });
+    if (!room)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: `Room with ID ${room_id} not found.`,
+        });
+
+    // Check for slot availability manually (optional but recommended)
+    const existingSchedule = await ExamSchedule.findOne({
+      where: {
+        exam_date: exam_date,
+        room_id: room_id,
+        exam_slot: exam_slot,
+      },
+    });
+    if (existingSchedule) {
+      return res
+        .status(409)
+        .json({
+          success: false,
+          message:
+            "This room is already scheduled for another exam at this date and slot.",
+        });
+    }
+
+    const newSchedule = await ExamSchedule.create({
+      course_id,
+      room_id,
+      exam_date,
+      start_time,
+      end_time,
+      exam_slot,
+      scheduled_students_count,
+      semester,
+      exam_type,
+    });
+
+    // Handle invigilators if provided
+    if (
+      invigilator_ids &&
+      Array.isArray(invigilator_ids) &&
+      invigilator_ids.length > 0
+    ) {
+      const invigilatorAssignments = [];
+      for (let i = 0; i < invigilator_ids.length; i++) {
+        const lecturer_id = invigilator_ids[i];
+        const lecturer = await Lecturer.findByPk(lecturer_id);
+        if (!lecturer) {
+          console.warn(
+            `Lecturer ID ${lecturer_id} not found for manual assignment to schedule ${newSchedule.schedule_id}. Skipping.`
+          );
+          // Optionally, you might want to return an error or still create the schedule without this invigilator.
+          // For now, we'll just warn and skip this specific invigilator.
+          continue;
+        }
+        invigilatorAssignments.push({
+          schedule_id: newSchedule.schedule_id,
+          lecturer_id: lecturer_id,
+          invigilator_order: i + 1,
+          role: `Giám thị ${i + 1}`,
+        });
+      }
+      if (invigilatorAssignments.length > 0) {
+        await ExamInvigilator.bulkCreate(invigilatorAssignments);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Tạo lịch thi thủ công thành công.",
+      data: newSchedule,
+    });
+  } catch (error) {
+    console.error("Lỗi khi tạo lịch thi thủ công:", error);
+    res.status(500).json({
+      success: false,
+      message: "Không thể tạo lịch thi thủ công.",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Manually update an exam schedule entry (Admin only, use with caution)
+// @route   PUT /api/exam-schedules/manual/:id
+// @access  Private (Admin)
+exports.manualUpdateExamSchedule = async (req, res) => {
+  const transaction = await ExamSchedule.sequelize.transaction();
+  try {
+    const { id } = req.params;
+    const { invigilator_ids, ...updateData } = req.body; // Tách invigilator_ids ra khỏi updateData
+
+    const existingSchedule = await ExamSchedule.findByPk(id, { transaction });
+    if (!existingSchedule) {
+      await transaction.rollback();
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: `Không tìm thấy lịch thi với ID ${id}.`,
+        });
+    }
+
+    // Validate existence of foreign keys if they are being updated
+    if (updateData.course_id) {
+      const course = await Course.findByPk(updateData.course_id, {
+        transaction,
+      });
+      if (!course) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Course with ID ${updateData.course_id} not found.`,
+          });
+      }
+    }
+    if (updateData.room_id) {
+      const room = await Room.findByPk(updateData.room_id, { transaction });
+      if (!room) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Room with ID ${updateData.room_id} not found.`,
+          });
+      }
+    }
+
+    // Check for slot availability for update (if date, room, or slot changed)
+    if (updateData.exam_date || updateData.room_id || updateData.exam_slot) {
+      const newExamDate = updateData.exam_date || existingSchedule.exam_date;
+      const newRoomId = updateData.room_id || existingSchedule.room_id;
+      const newExamSlot = updateData.exam_slot || existingSchedule.exam_slot;
+
+      const conflictSchedule = await ExamSchedule.findOne({
+        where: {
+          exam_date: newExamDate,
+          room_id: newRoomId,
+          exam_slot: newExamSlot,
+          schedule_id: { [Op.ne]: id }, // Exclude current schedule
+        },
+        transaction,
+      });
+      if (conflictSchedule) {
+        await transaction.rollback();
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message:
+              "This room is already scheduled for another exam at the new date and slot.",
+          });
+      }
+    }
+
+    // Update ExamSchedule
+    const [updatedRowsCount, updatedSchedules] = await ExamSchedule.update(
+      updateData,
+      {
+        where: { schedule_id: id },
+        returning: true,
+        transaction,
+      }
+    );
+
+    if (updatedRowsCount === 0) {
+      await transaction.rollback();
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: `Không tìm thấy lịch thi với ID ${id} để cập nhật.`,
+        });
+    }
+
+    // Handle invigilators update: clear existing and re-create if new IDs are provided
+    if (invigilator_ids !== undefined) {
+      // Check if invigilator_ids was even sent in the request body
+      await ExamInvigilator.destroy({
+        where: { schedule_id: id },
+        transaction,
+      });
+
+      if (Array.isArray(invigilator_ids) && invigilator_ids.length > 0) {
+        const invigilatorAssignments = [];
+        for (let i = 0; i < invigilator_ids.length; i++) {
+          const lecturer_id = invigilator_ids[i];
+          const lecturer = await Lecturer.findByPk(lecturer_id, {
+            transaction,
+          });
+          if (!lecturer) {
+            console.warn(
+              `Lecturer ID ${lecturer_id} not found for manual assignment to schedule ${id}. Skipping.`
+            );
+            continue;
+          }
+          invigilatorAssignments.push({
+            schedule_id: id,
+            lecturer_id: lecturer_id,
+            invigilator_order: i + 1,
+            role: `Giám thị ${i + 1}`,
+          });
+        }
+        if (invigilatorAssignments.length > 0) {
+          await ExamInvigilator.bulkCreate(invigilatorAssignments, {
+            transaction,
+          });
+        }
+      }
+    }
+
+    await transaction.commit();
+    res.status(200).json({
+      success: true,
+      message: "Cập nhật lịch thi thủ công thành công.",
+      data: updatedSchedules[0],
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(
+      `Lỗi khi cập nhật lịch thi thủ công ID ${req.params.id}:`,
+      error
+    );
+    res.status(500).json({
+      success: false,
+      message: "Không thể cập nhật lịch thi thủ công.",
+      error: error.message,
+    });
+  }
 };
